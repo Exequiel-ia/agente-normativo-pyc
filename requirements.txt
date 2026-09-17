@@ -1,0 +1,5 @@
+streamlit>=1.40,<2
+pypdf>=5,<7
+scikit-learn>=1.5,<2
+numpy>=2,<3
+google-genai>=1,<2
