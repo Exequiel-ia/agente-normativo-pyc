@@ -66,11 +66,11 @@ def generate_answer(
         if not text:
             raise RuntimeError("El modelo no devolvió contenido.")
         return text, "Gemini con RAG"
-    except Exception as exc:
+        except Exception as exc:
         fallback = _extractive_answer(results)
         return (
             f"No fue posible utilizar el modelo generativo en esta consulta. "
             f"Se muestra la evidencia recuperada.\n\n{fallback}\n\n"
-            f"Detalle técnico: `{type(exc).__name__}`",
+            f"Detalle técnico: `{type(exc).__name__}: {str(exc)}`",
             "respaldo extractivo",
         )
