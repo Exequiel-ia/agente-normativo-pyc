@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from src.rag_pipeline import SearchResult
+from rag_pipeline import SearchResult
 
 
 SYSTEM_INSTRUCTION = """Eres el Agente Normativo PyC.
