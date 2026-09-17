@@ -5,13 +5,14 @@ from pathlib import Path
 
 import streamlit as st
 
-from src.llm_client import generate_answer
-from src.rag_pipeline import build_knowledge_base, search_knowledge_base
-
+from llm_client import generate_answer
+from rag_pipeline import build_knowledge_base, search_knowledge_base
 
 ROOT = Path(__file__).parent
-DOCS_DIR = ROOT / "documentos_cmf"
-LOGO = ROOT / "assets" / "logo_pyc.jpg"
+
+DOCS_DIR = ROOT
+LOGO = ROOT / "logo_pyc.jpg"
+
 
 st.set_page_config(
     page_title="Agente Normativo PyC",
