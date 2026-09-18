@@ -1,6 +1,11 @@
 from __future__ import annotations
 
-from rag_pipeline import SearchResult
+import os
+
+try:
+    from src.rag_pipeline import SearchResult
+except ModuleNotFoundError:  # Compatibilidad con despliegue plano en GitHub.
+    from rag_pipeline import SearchResult
 
 
 SYSTEM_INSTRUCTION = """Eres el Agente Normativo PyC.
@@ -58,20 +63,20 @@ def generate_answer(
             f"PREGUNTA DEL USUARIO:\n{question}\n\n"
             f"CONTEXTO DOCUMENTAL:\n{_context(results)}"
         )
+        model_name = os.getenv("GEMINI_MODEL", "gemini-3.1-flash-lite")
         response = client.models.generate_content(
-           model="gemini-3.1-flash-lite",
+            model=model_name,
             contents=prompt,
         )
         text = (response.text or "").strip()
         if not text:
             raise RuntimeError("El modelo no devolvió contenido.")
         return text, "Gemini con RAG"
-
     except Exception as exc:
         fallback = _extractive_answer(results)
         return (
             f"No fue posible utilizar el modelo generativo en esta consulta. "
             f"Se muestra la evidencia recuperada.\n\n{fallback}\n\n"
-            f"Detalle técnico: `{type(exc).__name__}: {str(exc)}`",
+            f"Detalle técnico: `{type(exc).__name__}`",
             "respaldo extractivo",
         )

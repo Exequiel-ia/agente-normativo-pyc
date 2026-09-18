@@ -1,0 +1,32 @@
+{
+  "Contables.pdf": {
+    "organismo": "CMF",
+    "area": "Contables",
+    "tipo_documental": "Manual normativo",
+    "version": "Base inicial",
+    "fecha_vigencia": "",
+    "estado": "Vigente",
+    "clasificacion": "Público",
+    "responsable": "PyC"
+  },
+  "Deudores.pdf": {
+    "organismo": "CMF",
+    "area": "Deudores",
+    "tipo_documental": "Manual normativo",
+    "version": "Base inicial",
+    "fecha_vigencia": "",
+    "estado": "Vigente",
+    "clasificacion": "Público",
+    "responsable": "PyC"
+  },
+  "ReglasGenerales.pdf": {
+    "organismo": "CMF",
+    "area": "Reglas generales",
+    "tipo_documental": "Manual normativo",
+    "version": "Base inicial",
+    "fecha_vigencia": "",
+    "estado": "Vigente",
+    "clasificacion": "Público",
+    "responsable": "PyC"
+  }
+}
