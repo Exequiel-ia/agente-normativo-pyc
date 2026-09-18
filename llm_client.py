@@ -59,7 +59,7 @@ def generate_answer(
             f"CONTEXTO DOCUMENTAL:\n{_context(results)}"
         )
         response = client.models.generate_content(
-            model="gemini-3.1-flash",
+           model="gemini-3.1-flash-lite",
             contents=prompt,
         )
         text = (response.text or "").strip()
