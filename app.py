@@ -13,6 +13,11 @@ from pathlib import Path
 import streamlit as st
 
 try:
+    from src.ingestion_assistant import render_ingestion_assistant
+except ModuleNotFoundError:
+    from ingestion_assistant import render_ingestion_assistant
+
+try:
     from src.llm_client import generate_answer
     from src.rag_pipeline import (
         build_knowledge_base,
@@ -87,6 +92,9 @@ def package_knowledge_base() -> bytes:
             archive.write(pdf, f"documentos_cmf/{pdf.name}")
         if METADATA_PATH.exists():
             archive.write(METADATA_PATH, "knowledge_metadata.json")
+        governance_path = ROOT / "knowledge_governance.json"
+        if governance_path.exists():
+            archive.write(governance_path, "knowledge_governance.json")
         archive.writestr(
             "INSTRUCCIONES.txt",
             "Suba los PDF a documentos_cmf/ y knowledge_metadata.json a la raíz del repositorio.\n"
@@ -233,7 +241,7 @@ with knowledge_tab:
 
 with admin_tab:
     st.subheader("Administración de conocimiento")
-    st.caption("Carga, valida e incorpora documentos sin modificar el código de la aplicación.")
+    st.caption("Gestiona el ciclo completo: borrador, análisis, curación, pruebas y publicación.")
     admin_secret = os.getenv("ADMIN_PASSWORD", "") or get_secret("ADMIN_PASSWORD")
     if not admin_secret:
         st.warning(
@@ -247,87 +255,23 @@ with admin_tab:
             st.info("Ingresa la clave administrativa para habilitar la carga y publicación.")
         else:
             st.success("Acceso administrativo habilitado.")
-            st.markdown("#### 1. Seleccionar documentos")
-            uploads = st.file_uploader(
-                "Archivos PDF", type=["pdf"], accept_multiple_files=True,
-                help="Para el prototipo se admiten únicamente documentos PDF.",
+            def refresh_after_publish() -> None:
+                load_kb.clear()
+                st.session_state.pop("kb", None)
+                st.rerun()
+
+            admin_api_key = os.getenv("GEMINI_API_KEY", "") or get_secret("GEMINI_API_KEY")
+            admin_model = os.getenv("GEMINI_MODEL", "gemini-3.1-flash-lite")
+            render_ingestion_assistant(
+                documents_dir=DOCS_DIR,
+                metadata_path=METADATA_PATH,
+                api_key=admin_api_key,
+                model=admin_model,
+                on_publish=refresh_after_publish,
             )
-            meta_left, meta_right = st.columns(2)
-            with meta_left:
-                organism = st.text_input("Organismo emisor", value="CMF")
-                area = st.selectbox("Área o sistema", ["Deudores", "Contables", "Reglas generales", "Otro"])
-                document_type = st.selectbox("Tipo documental", ["Manual normativo", "Circular", "Norma", "Instructivo", "Otro"])
-                version = st.text_input("Versión", value=date.today().isoformat())
-            with meta_right:
-                effective_date = st.date_input("Fecha de vigencia", value=date.today())
-                status_value = st.selectbox("Estado", ["Vigente", "Borrador", "Derogado"])
-                confidentiality = st.selectbox("Clasificación", ["Público", "Uso interno", "Confidencial"])
-                owner = st.text_input("Responsable de la carga", value="Administrador PyC")
-
-            if uploads:
-                st.markdown("#### 2. Validación previa")
-                staged: list[dict] = []
-                existing_hashes = {file_sha256(pdf): pdf.name for pdf in DOCS_DIR.glob("*.pdf")}
-                with tempfile.TemporaryDirectory() as temp_dir:
-                    for upload in uploads:
-                        name = safe_pdf_name(upload.name)
-                        content = upload.getvalue()
-                        temp_path = Path(temp_dir) / name
-                        temp_path.write_bytes(content)
-                        try:
-                            inspection = inspect_pdf(temp_path)
-                            duplicate = existing_hashes.get(inspection.sha256)
-                            staged.append({"name": name, "content": content, "inspection": inspection, "duplicate": duplicate})
-                        except ValueError as exc:
-                            st.error(f"{name}: {exc}")
-
-                for item in staged:
-                    inspection = item["inspection"]
-                    with st.expander(f"{inspection.name} — {inspection.pages_with_text}/{inspection.total_pages} páginas con texto", expanded=True):
-                        if item["duplicate"]:
-                            st.warning(f"Documento duplicado de: {item['duplicate']}")
-                        st.write(f"**Tamaño:** {inspection.size_bytes / 1024:.1f} KB")
-                        st.write(f"**Caracteres extraídos:** {inspection.characters:,}")
-                        st.write(f"**Códigos detectados:** {', '.join(inspection.codes[:60]) or 'Ninguno'}")
-                        for warning in inspection.warnings:
-                            st.warning(warning)
-
-                publishable = [item for item in staged if not item["duplicate"] and item["inspection"].pages_with_text]
-                st.markdown("#### 3. Incorporación y publicación")
-                st.info(
-                    "En Streamlit Community Cloud los archivos quedan activos en la sesión del servidor, "
-                    "pero pueden perderse al reiniciarse. Después de publicar, descarga el paquete y súbelo a GitHub."
-                )
-                if st.button(
-                    f"Incorporar {len(publishable)} documento(s) y reconstruir la base",
-                    type="primary",
-                    disabled=not publishable,
-                ):
-                    current_metadata = load_metadata(METADATA_PATH)
-                    now = datetime.now(timezone.utc).isoformat()
-                    for item in publishable:
-                        destination = DOCS_DIR / item["name"]
-                        destination.write_bytes(item["content"])
-                        current_metadata[item["name"]] = {
-                            "organismo": organism,
-                            "area": area,
-                            "tipo_documental": document_type,
-                            "version": version,
-                            "fecha_vigencia": effective_date.isoformat(),
-                            "estado": status_value,
-                            "clasificacion": confidentiality,
-                            "responsable": owner,
-                            "fecha_ingesta": now,
-                            "sha256": item["inspection"].sha256,
-                        }
-                    save_metadata(METADATA_PATH, current_metadata)
-                    load_kb.clear()
-                    st.session_state.pop("kb", None)
-                    st.success("Documentos incorporados. La base se reconstruirá ahora.")
-                    st.rerun()
 
             st.divider()
-            st.markdown("#### 4. Respaldo para publicación permanente")
+            st.markdown("#### Respaldo para publicación permanente")
             st.download_button(
                 "Descargar paquete de conocimiento",
                 data=package_knowledge_base(),
