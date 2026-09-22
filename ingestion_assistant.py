@@ -192,6 +192,9 @@ def _init_state() -> None:
         "draft_sections": None,
         "draft_analysis": None,
         "draft_tests": [],
+        "draft_questions": None,
+        "ingestion_operation": "Nuevo documento",
+        "existing_document": "",
         "draft_metadata": {},
     }
     for key, value in defaults.items():
@@ -208,9 +211,12 @@ def _records(value) -> list[dict]:
 def _reset() -> None:
     for key in [
         "draft_document", "draft_inspection", "draft_pages", "draft_sections",
-        "draft_analysis", "draft_tests", "draft_metadata",
+        "draft_analysis", "draft_tests", "draft_questions", "draft_metadata",
+        "existing_document",
     ]:
-        st.session_state[key] = None if key != "draft_tests" else []
+        st.session_state[key] = [] if key == "draft_tests" else None
+    st.session_state.ingestion_operation = "Nuevo documento"
+    st.session_state.existing_document = ""
     st.session_state.ingestion_step = 1
 
 
@@ -330,7 +336,33 @@ def render_ingestion_assistant(
                 pass
         duplicate = existing_hashes.get(inspection.sha256)
         if duplicate:
-            st.error(f"El documento es idéntico a `{duplicate}`. No debe publicarse como una copia nueva.")
+            st.warning(
+                f"El documento es idéntico a `{duplicate}`. No se agregará una copia, "
+                "pero puedes reprocesarlo para mejorar su análisis, curación y pruebas."
+            )
+            operation = st.radio(
+                "¿Qué deseas hacer?",
+                ["Cancelar carga", "Reprocesar documento existente"],
+                index=1,
+                help="Reprocesar conserva un solo PDF y genera una nueva versión de su análisis y gobierno.",
+            )
+            st.session_state.ingestion_operation = operation
+            st.session_state.existing_document = duplicate
+            if operation == "Reprocesar documento existente":
+                # Usa siempre el nombre canónico ya publicado para evitar copias con otro nombre.
+                st.session_state.draft_document["name"] = duplicate
+        else:
+            same_name = (documents_dir / document["name"]).exists()
+            if same_name:
+                st.info(
+                    f"Ya existe `{document['name']}`, pero el contenido cambió. "
+                    "Se tratará como una nueva versión del documento."
+                )
+                st.session_state.ingestion_operation = "Actualizar versión existente"
+                st.session_state.existing_document = document["name"]
+            else:
+                st.session_state.ingestion_operation = "Nuevo documento"
+                st.session_state.existing_document = ""
         if inspection.warnings:
             for warning in inspection.warnings:
                 st.warning(warning)
@@ -341,7 +373,8 @@ def render_ingestion_assistant(
         back, forward = st.columns(2)
         if back.button("Volver a carga", use_container_width=True):
             st.session_state.ingestion_step = 1; st.rerun()
-        if forward.button("Aprobar validación y analizar", type="primary", use_container_width=True, disabled=bool(duplicate) or not inspection.pages_with_text):
+        blocked_duplicate = bool(duplicate) and st.session_state.ingestion_operation == "Cancelar carga"
+        if forward.button("Aprobar validación y analizar", type="primary", use_container_width=True, disabled=blocked_duplicate or not inspection.pages_with_text):
             st.session_state.ingestion_step = 3; st.rerun()
 
     elif current == 3:
@@ -373,8 +406,38 @@ def render_ingestion_assistant(
                     )
         if st.session_state.draft_analysis:
             _show_analysis(st.session_state.draft_analysis)
+            risks = st.session_state.draft_analysis.get("risks", [])
+            previous_responses = st.session_state.draft_analysis.get("risk_responses", [])
+            responses_by_risk = {
+                str(item.get("risk", "")): item for item in previous_responses if isinstance(item, dict)
+            }
+            risk_responses = []
+            if risks:
+                st.markdown("##### Respuesta del experto a cada observación")
+                st.caption("Responde cada punto por separado para mantener trazabilidad.")
+                for index, risk in enumerate(risks, 1):
+                    st.markdown(f"**Observación {index}:** {risk}")
+                    previous = responses_by_risk.get(str(risk), {})
+                    status = st.selectbox(
+                        f"Estado de la observación {index}",
+                        ["Aclarada", "Pendiente de validación", "No aplica"],
+                        index=["Aclarada", "Pendiente de validación", "No aplica"].index(
+                            previous.get("status", "Aclarada")
+                            if previous.get("status", "Aclarada") in ["Aclarada", "Pendiente de validación", "No aplica"]
+                            else "Aclarada"
+                        ),
+                        key=f"risk_status_{index}",
+                    )
+                    response = st.text_area(
+                        f"Respuesta o criterio experto {index}",
+                        value=previous.get("response", ""),
+                        placeholder="Escribe la aclaración, la regla aplicable o por qué no corresponde.",
+                        key=f"risk_response_{index}",
+                    )
+                    risk_responses.append({"risk": str(risk), "status": status, "response": response.strip()})
+                st.session_state.draft_analysis["risk_responses"] = risk_responses
             expert_notes = st.text_area(
-                "Observaciones o correcciones del experto",
+                "Observaciones generales adicionales",
                 value=st.session_state.draft_analysis.get("expert_notes", ""),
                 placeholder="Ej.: La sección de carátula también debe considerarse conocimiento principal...",
             )
@@ -416,14 +479,34 @@ def render_ingestion_assistant(
     elif current == 5:
         st.markdown("#### 5. Pruebas antes de publicar")
         suggestions = st.session_state.draft_analysis.get("suggested_questions", [])
-        default_questions = "\n".join(item.get("question", "") for item in suggestions if item.get("question"))
-        questions_text = st.text_area(
-            "Una pregunta por línea. Puedes corregir las propuestas o agregar preguntas propias.",
-            value=default_questions,
-            height=180,
+        if st.session_state.draft_questions is None:
+            st.session_state.draft_questions = [
+                {"usar": True, "pregunta": item.get("question", ""), "resultado_esperado": item.get("expected", "")}
+                for item in suggestions if item.get("question")
+            ]
+        st.write("Edita las preguntas, agrega filas nuevas o desmarca las que no correspondan antes de ejecutar.")
+        question_editor = st.data_editor(
+            st.session_state.draft_questions,
+            use_container_width=True,
+            hide_index=True,
+            num_rows="dynamic",
+            column_config={
+                "usar": st.column_config.CheckboxColumn("Usar en prueba"),
+                "pregunta": st.column_config.TextColumn("Pregunta", width="large", required=True),
+                "resultado_esperado": st.column_config.TextColumn("Resultado esperado", width="medium"),
+            },
+            key="question_editor",
         )
+        st.session_state.draft_questions = _records(question_editor)
         if st.button("Ejecutar pruebas de recuperación", type="primary"):
-            questions = [line.strip() for line in questions_text.splitlines() if line.strip()]
+            questions = [
+                str(row.get("pregunta", "")).strip()
+                for row in st.session_state.draft_questions
+                if row.get("usar", True) and str(row.get("pregunta", "")).strip()
+            ]
+            if not questions:
+                st.warning("Debes mantener al menos una pregunta activa para ejecutar las pruebas.")
+                st.stop()
             with tempfile.TemporaryDirectory() as temp_dir:
                 staging = Path(temp_dir)
                 for pdf in documents_dir.glob("*.pdf"):
@@ -475,6 +558,7 @@ def render_ingestion_assistant(
             "Secciones excluidas": len(st.session_state.draft_sections) - len(included),
             "Pruebas aprobadas": f"{approved}/{len(st.session_state.draft_tests)}",
             "Responsable": st.session_state.draft_metadata.get("responsable", "—"),
+            "Operación": st.session_state.ingestion_operation,
         }
         st.dataframe([summary], use_container_width=True, hide_index=True)
         version_id = datetime.now().strftime("%Y.%m.%d-%H%M")
@@ -500,6 +584,8 @@ def render_ingestion_assistant(
                     "secciones_incluidas": str(len(included)),
                     "pruebas_aprobadas": f"{approved}/{len(st.session_state.draft_tests)}",
                     "resumen_ia": st.session_state.draft_analysis.get("summary", ""),
+                    "operacion_ingesta": st.session_state.ingestion_operation,
+                    "documento_existente": st.session_state.existing_document,
                 }
             )
             metadata[document["name"]] = record
@@ -509,8 +595,12 @@ def render_ingestion_assistant(
                 governance = json.loads(governance_path.read_text(encoding="utf-8")) if governance_path.exists() else {}
             except (OSError, json.JSONDecodeError):
                 governance = {}
-            governance[document["name"]] = {
+            governance_key = st.session_state.existing_document or document["name"]
+            previous_governance = governance.get(governance_key, {})
+            previous_versions = previous_governance.get("versions", []) if isinstance(previous_governance, dict) else []
+            current_governance = {
                 "version_ingesta": version_id,
+                "operation": st.session_state.ingestion_operation,
                 "metadata": record,
                 "analysis": st.session_state.draft_analysis,
                 "curation": st.session_state.draft_sections,
@@ -522,6 +612,9 @@ def render_ingestion_assistant(
                     "approved_at": datetime.now(timezone.utc).isoformat(),
                 },
             }
+            history_entry = dict(current_governance)
+            history_entry.pop("versions", None)
+            governance[governance_key] = {**current_governance, "versions": [*previous_versions, history_entry]}
             governance_path.write_text(json.dumps(governance, ensure_ascii=False, indent=2), encoding="utf-8")
             st.success("Conocimiento publicado. La base será reconstruida.")
             _reset()
