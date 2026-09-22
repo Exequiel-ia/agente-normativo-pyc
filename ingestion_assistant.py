@@ -3,6 +3,7 @@ from __future__ import annotations
 import json
 import re
 import tempfile
+import time
 from datetime import date, datetime, timezone
 from pathlib import Path
 from typing import Callable
@@ -193,6 +194,7 @@ def _init_state() -> None:
         "draft_analysis": None,
         "draft_tests": [],
         "draft_questions": None,
+        "analysis_error": "",
         "ingestion_operation": "Nuevo documento",
         "existing_document": "",
         "draft_metadata": {},
@@ -212,11 +214,13 @@ def _reset() -> None:
     for key in [
         "draft_document", "draft_inspection", "draft_pages", "draft_sections",
         "draft_analysis", "draft_tests", "draft_questions", "draft_metadata",
+        "analysis_error",
         "existing_document",
     ]:
         st.session_state[key] = [] if key == "draft_tests" else None
     st.session_state.ingestion_operation = "Nuevo documento"
     st.session_state.existing_document = ""
+    st.session_state.analysis_error = ""
     st.session_state.ingestion_step = 1
 
 
@@ -382,21 +386,50 @@ def render_ingestion_assistant(
         if not st.session_state.draft_analysis:
             if api_key:
                 if st.button("Analizar documento con Gemini", type="primary"):
+                    st.session_state.analysis_error = ""
+                    last_error = None
+                    delays = [0, 2, 5]
                     with st.spinner("Gemini está identificando propósito, obligaciones, plazos y conceptos..."):
-                        try:
-                            analysis = analyze_with_gemini(
-                                st.session_state.draft_pages,
-                                st.session_state.draft_sections,
-                                api_key,
-                                model,
+                        for attempt, delay in enumerate(delays, 1):
+                            if delay:
+                                time.sleep(delay)
+                            try:
+                                analysis = analyze_with_gemini(
+                                    st.session_state.draft_pages,
+                                    st.session_state.draft_sections,
+                                    api_key,
+                                    model,
+                                )
+                                st.session_state.draft_analysis = analysis
+                                st.session_state.draft_sections = _apply_section_guidance(
+                                    st.session_state.draft_sections, analysis
+                                )
+                                last_error = None
+                                break
+                            except Exception as exc:
+                                last_error = exc
+                        if last_error is not None:
+                            detail = str(last_error).strip() or "El proveedor no entregó detalles."
+                            st.session_state.analysis_error = (
+                                f"{type(last_error).__name__}: {detail[:1200]}"
                             )
-                            st.session_state.draft_analysis = analysis
-                            st.session_state.draft_sections = _apply_section_guidance(
-                                st.session_state.draft_sections, analysis
-                            )
-                        except Exception as exc:
-                            st.error(f"No fue posible completar el análisis: {type(exc).__name__}")
-            else:
+            if st.session_state.analysis_error:
+                st.error("Gemini no respondió después de 3 intentos.")
+                with st.expander("Ver detalle técnico"):
+                    st.code(st.session_state.analysis_error)
+                st.info(
+                    "Puedes volver a intentar más tarde o continuar con un análisis básico. "
+                    "El documento cargado no se perderá."
+                )
+                if st.button("Continuar con análisis básico", type="secondary"):
+                    st.session_state.draft_analysis = _analysis_fallback(
+                        st.session_state.draft_document["name"],
+                        st.session_state.draft_inspection,
+                        st.session_state.draft_sections,
+                    )
+                    st.session_state.analysis_error = ""
+                    st.rerun()
+            if not api_key:
                 st.warning("No se encontró GEMINI_API_KEY. Se puede continuar con un análisis básico.")
                 if st.button("Generar análisis básico"):
                     st.session_state.draft_analysis = _analysis_fallback(
