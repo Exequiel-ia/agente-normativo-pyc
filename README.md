@@ -42,16 +42,19 @@ GEMINI_API_KEY = "tu_clave_de_gemini"
 ADMIN_PASSWORD = "una_clave_administrativa_distinta"
 ```
 
-## Administración de conocimiento
+## Administración y gobierno del conocimiento
 
-La pestaña **Administración** permite:
+La pestaña **Administración** funciona como un asistente de seis etapas:
 
-1. Autenticarse con una clave administrativa.
-2. Cargar uno o varios PDF.
-3. Completar organismo, área, tipo, versión, vigencia, estado y responsable.
-4. Validar páginas con texto, duplicados, tamaño y códigos normativos detectados.
-5. Incorporar los documentos y reconstruir la base.
-6. Descargar un ZIP de respaldo para hacer permanente la actualización en GitHub.
+1. Cargar el PDF y registrar su contexto.
+2. Validar texto, páginas, duplicados y códigos detectados.
+3. Analizar propósito, alcance, obligaciones, plazos y riesgos con Gemini.
+4. Curar las secciones que formarán parte del conocimiento.
+5. Ejecutar preguntas de prueba sobre un índice temporal.
+6. Aprobar y publicar una versión trazable.
+
+`knowledge_metadata.json` mantiene el inventario documental y
+`knowledge_governance.json` registra análisis, decisiones de curación, pruebas y aprobaciones.
 
 La carga hecha dentro de Streamlit Community Cloud puede perderse cuando el servidor
 se reinicia. Para una actualización permanente, descargue el paquete generado y suba
