@@ -104,6 +104,20 @@ def _detect_sections(pages: list[dict]) -> list[dict]:
     return sections[:80]
 
 
+def _curated_page_numbers(sections: list[dict]) -> set[int]:
+    """La curación usa páginas completas, no fragmentos de página."""
+    chosen: set[int] = set()
+    for row in sections:
+        if not row.get("include") or row.get("classification") == "Excluir":
+            continue
+        match = re.fullmatch(r"(\d+)(?:-(\d+))?", str(row.get("pages", "")).strip())
+        if match:
+            first, last = int(match.group(1)), int(match.group(2) or match.group(1))
+            if last >= first:
+                chosen.update(range(first, last + 1))
+    return chosen
+
+
 def _json_from_response(text: str) -> dict:
     cleaned = text.strip()
     cleaned = re.sub(r"^```(?:json)?\s*", "", cleaned, flags=re.IGNORECASE)
@@ -503,6 +517,18 @@ def render_ingestion_assistant(
         st.session_state.draft_sections = edited_records
         included = sum(1 for row in edited_records if row.get("include") and row.get("classification") != "Excluir")
         st.metric("Secciones que se incorporarán", included)
+        indexed_pages = _curated_page_numbers(edited_records)
+        st.caption(f"Páginas que se indexarán: {len(indexed_pages)} (curación por página).")
+        excluded = set()
+        for row in edited_records:
+            if row.get("include") and row.get("classification") != "Excluir":
+                continue
+            match = re.fullmatch(r"(\d+)(?:-(\d+))?", str(row.get("pages", "")).strip())
+            if match:
+                excluded.update(range(int(match.group(1)), int(match.group(2) or match.group(1)) + 1))
+        if excluded & indexed_pages:
+            st.warning("Hay secciones incluidas y excluidas en una misma página. "
+                       "Se conservará la página completa; no se excluyen párrafos individuales.")
         back, forward = st.columns(2)
         if back.button("Volver al análisis", use_container_width=True):
             st.session_state.ingestion_step = 3; st.rerun()
@@ -545,8 +571,15 @@ def render_ingestion_assistant(
                 for pdf in documents_dir.glob("*.pdf"):
                     (staging / pdf.name).write_bytes(pdf.read_bytes())
                 (staging / st.session_state.draft_document["name"]).write_bytes(st.session_state.draft_document["bytes"])
+                staging_metadata = load_metadata(metadata_path)
+                staging_metadata[st.session_state.draft_document["name"]] = {
+                    **st.session_state.draft_metadata,
+                    "indexed_pages": sorted(_curated_page_numbers(st.session_state.draft_sections)),
+                }
+                staging_path = staging / "knowledge_metadata.json"
+                save_metadata(staging_path, staging_metadata)
                 with st.spinner("Construyendo índice de prueba..."):
-                    test_kb = build_knowledge_base(staging, metadata_path)
+                    test_kb = build_knowledge_base(staging, staging_path)
                 results = []
                 for question in questions:
                     retrieved = search_knowledge_base(test_kb, question, top_k=5)
@@ -611,6 +644,7 @@ def render_ingestion_assistant(
             record.update(
                 {
                     "estado": "Vigente",
+                    "indexed_pages": sorted(_curated_page_numbers(st.session_state.draft_sections)),
                     "fecha_ingesta": datetime.now(timezone.utc).isoformat(),
                     "version_ingesta": version_id,
                     "sha256": inspection.sha256,
