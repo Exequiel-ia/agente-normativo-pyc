@@ -53,6 +53,11 @@ La pestaña **Administración** funciona como un asistente de seis etapas:
 5. Ejecutar preguntas de prueba sobre un índice temporal.
 6. Aprobar y publicar una versión trazable.
 
+La curación se aplica ahora al índice a **nivel de página**; las páginas excluidas
+no se indexan, excepto si también forman parte de una sección incluida. Las pruebas
+previas a publicar emplean esta misma selección. La curación dentro de una página
+queda pendiente de una futura versión.
+
 `knowledge_metadata.json` mantiene el inventario documental y
 `knowledge_governance.json` registra análisis, decisiones de curación, pruebas y aprobaciones.
 
