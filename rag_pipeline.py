@@ -169,8 +169,19 @@ def build_knowledge_base(
         pages_with_text = 0
         current_section_code = ""
         doc_metadata = document_metadata.get(pdf_path.name, {})
+        allowed_pages = None
+        if "indexed_pages" in doc_metadata:
+            raw = doc_metadata["indexed_pages"]
+            if isinstance(raw, str):
+                raw = [item.strip() for item in raw.split(",") if item.strip()]
+            try:
+                allowed_pages = {int(n) for n in raw}
+            except (TypeError, ValueError):
+                allowed_pages = set()
         metadata_prefix = " | ".join(f"{k}: {v}" for k, v in doc_metadata.items() if v)
         for page_number, page in enumerate(reader.pages, 1):
+            if allowed_pages is not None and page_number not in allowed_pages:
+                continue
             text = _clean(page.extract_text() or "")
             if not text:
                 continue
